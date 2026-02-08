@@ -69,7 +69,7 @@ Tradeili is a complete intelligent trading assistant for the BVMT, featuring:
 │       └─────────────┴───────────┴───────────────┘           │
 │                          │                                   │
 │  ┌───────────────────────┴───────────────────────────────┐   │
-│  │    Multi-Agent System (5 Agents + Safety + Logger)    │   │
+│  │    Multi-Agent System (4 Agents + Safety + Logger)    │   │
 │  └───────────────────────────────────────────────────────┘   │
 │                          │                                   │
 │  ┌───────────────────────┴───────────────────────────────┐   │
