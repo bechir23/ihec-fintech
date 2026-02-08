@@ -61,6 +61,66 @@ class BVMTForecaster:
     # ── Stationarity & Diagnostics ──
 
     @staticmethod
+    def compute_aic_bic(residuals, n_params: int) -> dict:
+        """
+        Compute AIC and BIC from residuals using Gaussian log-likelihood.
+        AIC = 2k - 2*ln(L)
+        BIC = k*ln(n) - 2*ln(L)
+        where L is the maximized likelihood, k is number of parameters, n is sample size.
+        """
+        residuals = np.asarray(residuals, dtype=float)
+        residuals = residuals[~np.isnan(residuals)]
+        n = len(residuals)
+        if n < 5:
+            return {"aic": None, "bic": None}
+        
+        sse = float(np.sum(residuals ** 2))
+        sigma2 = sse / n
+        if sigma2 <= 0:
+            sigma2 = 1e-10
+        
+        # Gaussian log-likelihood: -n/2 * (ln(2*pi) + ln(sigma2) + 1)
+        log_likelihood = -n / 2.0 * (np.log(2 * np.pi) + np.log(sigma2) + 1.0)
+        
+        k = n_params
+        aic = 2 * k - 2 * log_likelihood
+        bic = k * np.log(n) - 2 * log_likelihood
+        
+        return {
+            "aic": round(float(aic), 2),
+            "bic": round(float(bic), 2),
+            "log_likelihood": round(float(log_likelihood), 2),
+            "n_params": k,
+            "n_obs": n,
+            "sigma2": round(float(sigma2), 6)
+        }
+
+    @staticmethod
+    def compute_forecast_metrics(actual, predicted) -> dict:
+        """Compute RMSE, MAE, and Directional Accuracy."""
+        actual = np.asarray(actual, dtype=float)
+        predicted = np.asarray(predicted, dtype=float)
+        n = min(len(actual), len(predicted))
+        if n < 2:
+            return {}
+        actual = actual[:n]
+        predicted = predicted[:n]
+        
+        rmse = float(np.sqrt(np.mean((actual - predicted) ** 2)))
+        mae = float(np.mean(np.abs(actual - predicted)))
+        
+        # Directional accuracy
+        actual_dir = np.diff(actual) > 0
+        pred_dir = np.diff(predicted) > 0
+        da = float(np.mean(actual_dir == pred_dir) * 100) if len(actual_dir) > 0 else 0
+        
+        return {
+            "rmse": round(rmse, 4),
+            "mae": round(mae, 4),
+            "directional_accuracy": round(da, 2)
+        }
+
+    @staticmethod
     def check_stationarity(series: pd.Series, name: str = "series") -> dict:
         """Quick ADF stationarity test (limited data for speed)."""
         clean = series.dropna().tail(100)
@@ -68,7 +128,8 @@ class BVMTForecaster:
             return {"stationary": False, "reason": "Too few observations"}
         try:
             from statsmodels.tsa.stattools import adfuller
-            adf_stat, adf_p, _, _, _, _ = adfuller(clean, maxlag=5, autolag=None)
+            _adf_result = adfuller(clean, maxlag=5, autolag=None)
+            adf_stat, adf_p = float(_adf_result[0]), float(_adf_result[1])
         except Exception:
             return {"name": name, "stationary": False, "adf_pvalue": 1.0}
         return {
@@ -290,25 +351,37 @@ class BVMTForecaster:
         floor = self._price_floor(last_price)
 
         # 1. Stationarity diagnostics
-        # NOTE: statsmodels import/ADF can be slow/hang on some Windows setups.
-        # In fast mode (default in UI), skip this to guarantee responsiveness.
-        if not fast:
-            results["stationarity"] = self.check_stationarity(close_series, "close_price")
-            results["volume_stationarity"] = self.check_stationarity(volume_series, "volume")
-        else:
-            results["stationarity"] = {"name": "close_price", "skipped": True}
-            results["volume_stationarity"] = {"name": "volume", "skipped": True}
+        # ADF test is fast (100 points, maxlag=5) — always run it.
+        results["stationarity"] = self.check_stationarity(close_series, "close_price")
+        results["volume_stationarity"] = self.check_stationarity(volume_series, "volume")
 
         # 2. EMA extrapolation (replaces SARIMA — instant)
         ema_result = self.fit_ema_forecast(close_series, horizon)
         ema_forecast = []
         if ema_result:
             ema_forecast = ema_result["forecast"]
+            # Compute AIC/BIC from EMA fitted residuals
+            ema_data = close_series.dropna().tail(100).values
+            if len(ema_data) >= 10:
+                def _ema_fit(arr, span):
+                    alpha = 2.0 / (span + 1)
+                    out = np.empty_like(arr, dtype=float)
+                    out[0] = arr[0]
+                    for i in range(1, len(arr)):
+                        out[i] = alpha * arr[i] + (1 - alpha) * out[i - 1]
+                    return out
+                ema_fitted = _ema_fit(ema_data, 10)
+                ema_residuals = ema_data[1:] - ema_fitted[:-1]  # one-step-ahead residuals
+                ema_ic = self.compute_aic_bic(ema_residuals, n_params=2)  # span + intercept
+            else:
+                ema_ic = {"aic": None, "bic": None}
             results["sarima"] = {
                 "forecast": ema_result["forecast"],
                 "lower_ci": ema_result["lower_ci"],
                 "upper_ci": ema_result["upper_ci"],
-                "aic": 0,
+                "aic": ema_ic.get("aic"),
+                "bic": ema_ic.get("bic"),
+                "log_likelihood": ema_ic.get("log_likelihood"),
                 "method": "ema_extrapolation",
                 "ema10": ema_result.get("ema10"),
                 "ema20": ema_result.get("ema20"),
@@ -320,10 +393,29 @@ class BVMTForecaster:
         lr_forecast = []
         if lr_result:
             lr_forecast = lr_result["forecast"]
+            # Compute AIC/BIC from LR residuals
+            lr_data = np.asarray(close_series.dropna().tail(30).values, dtype=float)
+            if len(lr_data) >= 10:
+                n_lr = len(lr_data)
+                x_lr = np.arange(n_lr, dtype=float)
+                weights_lr = np.exp(np.linspace(-1, 0, n_lr))
+                xm_lr = np.average(x_lr, weights=weights_lr)
+                ym_lr = np.average(lr_data, weights=weights_lr)
+                cov_xy_lr = np.average((x_lr - xm_lr) * (lr_data - ym_lr), weights=weights_lr)
+                var_x_lr = np.average((x_lr - xm_lr) ** 2, weights=weights_lr)
+                slope_lr = cov_xy_lr / var_x_lr if var_x_lr > 0 else 0
+                intercept_lr = ym_lr - slope_lr * xm_lr
+                lr_residuals = lr_data - (intercept_lr + slope_lr * x_lr)
+                lr_ic = self.compute_aic_bic(lr_residuals, n_params=2)  # slope + intercept
+            else:
+                lr_ic = {"aic": None, "bic": None}
             results["ets"] = {
                 "forecast": lr_result["forecast"],
                 "lower_ci": lr_result["lower_ci"],
                 "upper_ci": lr_result["upper_ci"],
+                "aic": lr_ic.get("aic"),
+                "bic": lr_ic.get("bic"),
+                "log_likelihood": lr_ic.get("log_likelihood"),
                 "method": "weighted_linear_regression",
                 "slope_per_day": lr_result.get("slope_per_day"),
                 "r_squared": lr_result.get("r_squared"),
@@ -392,6 +484,52 @@ class BVMTForecaster:
             last_date = df['date'].max()
             forecast_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
             results["forecast_dates"] = [str(d.date()) for d in forecast_dates]
+
+        # Collect best AIC/BIC across all models
+        all_aic = []
+        all_bic = []
+        for key in ['sarima', 'ets', 'xgboost']:
+            model_res = results.get(key, {})
+            if model_res.get('aic') is not None:
+                all_aic.append(model_res['aic'])
+            if model_res.get('bic') is not None:
+                all_bic.append(model_res['bic'])
+            # Also check metrics sub-dict (xgboost)
+            metrics_sub = model_res.get('metrics', {})
+            if metrics_sub.get('aic') is not None:
+                all_aic.append(metrics_sub['aic'])
+            if metrics_sub.get('bic') is not None:
+                all_bic.append(metrics_sub['bic'])
+
+        results["model_selection"] = {
+            "best_aic": round(min(all_aic), 2) if all_aic else None,
+            "best_bic": round(min(all_bic), 2) if all_bic else None,
+            "all_aic": {k: results.get(k, {}).get('aic') for k in ['sarima', 'ets'] if results.get(k, {}).get('aic') is not None},
+            "all_bic": {k: results.get(k, {}).get('bic') for k in ['sarima', 'ets'] if results.get(k, {}).get('bic') is not None},
+        }
+
+        # Compute backtest metrics (RMSE, MAE, DA) from recent data
+        try:
+            recent = close_series.tail(30).values
+            if len(recent) >= 15:
+                train_part = recent[:20]
+                test_part = recent[20:]
+                if len(test_part) >= 5:
+                    series_train = pd.Series(train_part)
+                    ema_bt = self.fit_ema_forecast(series_train, len(test_part))
+                    lr_bt = self.fit_linear_forecast(series_train, len(test_part))
+                    pred_bt = []
+                    if ema_bt and lr_bt:
+                        for j in range(len(test_part)):
+                            pred_bt.append((ema_bt['forecast'][j] + lr_bt['forecast'][j]) / 2)
+                    elif ema_bt:
+                        pred_bt = ema_bt['forecast'][:len(test_part)]
+                    elif lr_bt:
+                        pred_bt = lr_bt['forecast'][:len(test_part)]
+                    if pred_bt:
+                        results["backtest_metrics"] = self.compute_forecast_metrics(test_part, pred_bt)
+        except Exception:
+            pass
 
         # 6. Volume forecast — simple moving average
         avg_vol = float(volume_series.tail(20).mean())

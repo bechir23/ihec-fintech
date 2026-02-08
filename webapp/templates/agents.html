@@ -167,9 +167,23 @@ async function refreshAgents() {
         const d = await res.json();
         if (d.success && d.workflow_log && d.workflow_log.length) {
             document.getElementById('logCount').textContent = d.workflow_log.length;
-            document.getElementById('workflowLog').innerHTML = d.workflow_log.map(l =>
-                `<div class="log-entry"><span class="text-secondary">${l.timestamp||''}</span> <span class="text-accent">[${l.agent||''}]</span> ${l.message||JSON.stringify(l)}</div>`
-            ).join('');
+            document.getElementById('workflowLog').innerHTML = d.workflow_log.map(l => {
+                const ts = l.timestamp || '';
+                const sender = l.sender || l.agent || '';
+                const receiver = l.receiver || '';
+                const action = l.action || '';
+                const detail = l.detail || l.message || JSON.stringify(l);
+                const actionBadge = action === 'RESULT' ? 'badge-green' :
+                                    action === 'TASK_ASSIGN' ? 'badge-accent' :
+                                    action === 'DECISION' ? 'badge-orange' :
+                                    action === 'COMPLETE' ? 'badge-purple' : 'badge-accent';
+                return `<div class="d-flex align-items-start gap-2 py-1 border-bottom" style="border-color:var(--border)!important">
+                    <small class="text-secondary text-nowrap">${ts}</small>
+                    <span class="badge ${actionBadge} text-nowrap">${action}</span>
+                    <small><span class="text-accent">${sender}</span> → <span class="text-cyan">${receiver}</span></small>
+                    <small class="text-secondary text-truncate">${detail}</small>
+                </div>`;
+            }).join('');
         }
     } catch(e) { /* silent */ }
 }

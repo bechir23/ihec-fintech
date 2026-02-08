@@ -63,6 +63,22 @@ try:
 except Exception:
     orchestrator = None
 
+# ── Workflow log (A2A messages) — persists across requests ──
+_workflow_log = []
+
+def _add_workflow_entry(sender, receiver, action, detail=""):
+    """Append a timestamped A2A workflow entry."""
+    _workflow_log.append({
+        'timestamp': datetime.now().strftime('%H:%M:%S'),
+        'sender': sender,
+        'receiver': receiver,
+        'action': action,
+        'detail': detail,
+    })
+    # Keep only last 50 entries
+    if len(_workflow_log) > 50:
+        del _workflow_log[:-50]
+
 print("  [OK] All modules loaded.", flush=True)
 
 # ── Flask app ──
@@ -254,13 +270,58 @@ def _quick_forecast_from_tail_payload(tail_payload: dict, stock_code: str, horiz
 
     avg_vol = float(np.mean(volumes[-20:])) if volumes else 0.0
 
+    # Run quick ADF stationarity test on close prices
+    stationarity_result = {"name": "close_price", "skipped": True}
+    try:
+        close_arr = np.asarray(close[-min(100, len(close)):], dtype=float)
+        if len(close_arr) >= 20:
+            from statsmodels.tsa.stattools import adfuller
+            _adf_res = adfuller(close_arr, maxlag=5, autolag=None)
+            adf_stat, adf_p = float(_adf_res[0]), float(_adf_res[1])
+            stationarity_result = {
+                "name": "close_price",
+                "adf_statistic": round(float(adf_stat), 4),
+                "adf_pvalue": round(float(adf_p), 4),
+                "adf_stationary": adf_p < 0.05,
+                "stationary": adf_p < 0.05,
+                "recommendation": "Stationary" if adf_p < 0.05 else "Difference needed"
+            }
+    except Exception:
+        pass
+
+    # Compute AIC/BIC from fitted residuals
+    aic_val = None
+    bic_val = None
+    try:
+        if len(close) >= 10:
+            n_ic = len(close)
+            x_ic = np.arange(n_ic, dtype=float)
+            w_ic = np.exp(np.linspace(-1, 0, n_ic))
+            xm_ic = np.average(x_ic, weights=w_ic)
+            ym_ic = np.average(close, weights=w_ic)
+            cov_ic = np.average((x_ic - xm_ic) * (np.array(close) - ym_ic), weights=w_ic)
+            var_ic = np.average((x_ic - xm_ic) ** 2, weights=w_ic)
+            sl_ic = cov_ic / var_ic if var_ic > 0 else 0
+            int_ic = ym_ic - sl_ic * xm_ic
+            resid_ic = np.array(close) - (int_ic + sl_ic * x_ic)
+            sse_ic = float(np.sum(resid_ic ** 2))
+            sigma2_ic = sse_ic / n_ic
+            if sigma2_ic > 0:
+                ll_ic = -n_ic / 2.0 * (np.log(2 * np.pi) + np.log(sigma2_ic) + 1.0)
+                aic_val = round(2 * 2 - 2 * ll_ic, 2)
+                bic_val = round(2 * np.log(n_ic) - 2 * ll_ic, 2)
+    except Exception:
+        pass
+
     return {
         "stock_code": stock_code,
         "horizon": int(horizon),
         "last_date": last_date_str,
         "last_close": float(last_close),
-        "stationarity": {"name": "close_price", "skipped": True},
+        "stationarity": stationarity_result,
         "volume_stationarity": {"name": "volume", "skipped": True},
+        "sarima": {"aic": aic_val, "bic": bic_val, "method": "quick-damped-trend"},
+        "model_selection": {"best_aic": aic_val, "best_bic": bic_val},
         "ensemble": {
             "forecast": forecasts,
             "lower_ci": lower,
@@ -329,13 +390,59 @@ def _quick_forecast_from_df(stock_df: pd.DataFrame, stock_code: str, horizon: in
 
     avg_vol = float(sdf['volume'].dropna().tail(20).mean()) if 'volume' in sdf.columns else 0.0
 
+    # Run quick ADF stationarity test
+    stationarity_result = {"name": "close_price", "skipped": True}
+    try:
+        close_arr = np.asarray(close.tail(min(100, len(close))).values, dtype=float)
+        if len(close_arr) >= 20:
+            from statsmodels.tsa.stattools import adfuller
+            _adf_res = adfuller(close_arr, maxlag=5, autolag=None)
+            adf_stat, adf_p = float(_adf_res[0]), float(_adf_res[1])
+            stationarity_result = {
+                "name": "close_price",
+                "adf_statistic": round(float(adf_stat), 4),
+                "adf_pvalue": round(float(adf_p), 4),
+                "adf_stationary": adf_p < 0.05,
+                "stationary": adf_p < 0.05,
+                "recommendation": "Stationary" if adf_p < 0.05 else "Difference needed"
+            }
+    except Exception:
+        pass
+
+    # Compute AIC/BIC
+    aic_val = None
+    bic_val = None
+    try:
+        close_vals = close.values
+        if len(close_vals) >= 10:
+            n_ic = len(close_vals)
+            x_ic = np.arange(n_ic, dtype=float)
+            w_ic = np.exp(np.linspace(-1, 0, n_ic))
+            xm_ic = np.average(x_ic, weights=w_ic)
+            ym_ic = np.average(close_vals, weights=w_ic)
+            cov_ic = np.average((x_ic - xm_ic) * (close_vals - ym_ic), weights=w_ic)
+            var_ic = np.average((x_ic - xm_ic) ** 2, weights=w_ic)
+            sl_ic = cov_ic / var_ic if var_ic > 0 else 0
+            int_ic = ym_ic - sl_ic * xm_ic
+            resid_ic = close_vals - (int_ic + sl_ic * x_ic)
+            sse_ic = float(np.sum(resid_ic ** 2))
+            sigma2_ic = sse_ic / n_ic
+            if sigma2_ic > 0:
+                ll_ic = -n_ic / 2.0 * (np.log(2 * np.pi) + np.log(sigma2_ic) + 1.0)
+                aic_val = round(2 * 2 - 2 * ll_ic, 2)
+                bic_val = round(2 * np.log(n_ic) - 2 * ll_ic, 2)
+    except Exception:
+        pass
+
     return {
         "stock_code": stock_code,
         "horizon": int(horizon),
         "last_date": str(last_date.date()) if hasattr(last_date, 'date') else str(last_date),
         "last_close": float(last_close),
-        "stationarity": {"name": "close_price", "skipped": True},
+        "stationarity": stationarity_result,
         "volume_stationarity": {"name": "volume", "skipped": True},
+        "sarima": {"aic": aic_val, "bic": bic_val, "method": "quick-damped-trend"},
+        "model_selection": {"best_aic": aic_val, "best_bic": bic_val},
         "ensemble": {
             "forecast": forecasts,
             "lower_ci": lower,
@@ -887,11 +994,14 @@ def api_drift_compare(stock_code):
 
 @app.route('/api/agents/status')
 def api_agents_status():
-    if orchestrator is None:
-        return jsonify({'success': True, 'agents': [], 'workflow_log': [],
-                        'message': 'CrewAI not loaded'})
-    return jsonify({'success': True, 'agents': orchestrator.get_agent_status(),
-                    'workflow_log': orchestrator.get_workflow_log()[-20:]})
+    agents_list = []
+    log = list(_workflow_log[-20:])
+    if orchestrator is not None:
+        agents_list = orchestrator.get_agent_status()
+        orch_log = orchestrator.get_workflow_log()[-20:]
+        if orch_log:
+            log = orch_log
+    return jsonify({'success': True, 'agents': agents_list, 'workflow_log': log})
 
 
 @app.route('/api/agents/analyze/<stock_code>', methods=['POST'])
@@ -903,15 +1013,22 @@ def api_agents_analyze(stock_code):
         stock_df = df[df['code'] == stock_code].sort_values('date').copy()
         stock_name = stock_df['stock'].iloc[-1] if len(stock_df) > 0 else stock_code
 
+        _add_workflow_entry('Orchestrator', 'ScraperAgent', 'TASK_ASSIGN',
+                            f'Analyser {stock_code} ({stock_name})')
+
         # Step 1: Scraping / Data collection
         t1 = _time.time()
         recent = stock_df.tail(60)
         steps.append({'step': 1, 'name': 'Scraping', 'status': 'completed',
                       'output': f'Collecté {len(stock_df)} enregistrements pour {stock_name}, dernières 60 séances analysées.',
                       'duration_ms': int((_time.time() - t1) * 1000)})
+        _add_workflow_entry('ScraperAgent', 'Orchestrator', 'RESULT',
+                            f'{len(stock_df)} enregistrements collectés')
 
         # Step 2: Forecasting
         t2 = _time.time()
+        _add_workflow_entry('Orchestrator', 'ForecastAgent', 'TASK_ASSIGN',
+                            f'Prévision 5J pour {stock_code}')
         forecaster = BVMTForecaster(stock_code)
         forecast = forecaster.forecast(stock_df, horizon=5, fast=True)
         fc_values = forecast.get('ensemble', {}).get('forecast', forecast.get('forecast', []))
@@ -919,25 +1036,37 @@ def api_agents_analyze(stock_code):
         steps.append({'step': 2, 'name': 'Forecasting', 'status': 'completed',
                       'output': f'Prévision 5 jours: {["{:.3f}".format(v) if isinstance(v,(int,float)) else str(v) for v in (fc_values[:5] if fc_values else [])]} | Modèles: {", ".join(models) if models else "ensemble"}',
                       'duration_ms': int((_time.time() - t2) * 1000)})
+        _add_workflow_entry('ForecastAgent', 'Orchestrator', 'RESULT',
+                            f'Modèles: {", ".join(models) if models else "ensemble"}')
 
         # Step 3: Sentiment
         t3 = _time.time()
+        _add_workflow_entry('Orchestrator', 'SentimentAgent', 'TASK_ASSIGN',
+                            f'Analyse sentiment {stock_name}')
         sentiment = get_sentiment_for_stock(stock_name)
         steps.append({'step': 3, 'name': 'Sentiment', 'status': 'completed',
                       'output': f'Sentiment: {sentiment["sentiment"]} (score: {sentiment["score"]}) — Sources: {", ".join(sentiment.get("sources",[]))}',
                       'duration_ms': int((_time.time() - t3) * 1000)})
+        _add_workflow_entry('SentimentAgent', 'Orchestrator', 'RESULT',
+                            f'{sentiment["sentiment"]} (score={sentiment["score"]})')
 
         # Step 4: Anomaly Detection
         t4 = _time.time()
+        _add_workflow_entry('Orchestrator', 'AnomalyAgent', 'TASK_ASSIGN',
+                            f'Détection anomalies {stock_code}')
         detector = AnomalyDetector()
         anomalies = detector.detect_all(recent)
         alert_list = anomalies.get('alerts', [])
         steps.append({'step': 4, 'name': 'Anomaly', 'status': 'completed',
                       'output': f'{len(alert_list)} anomalies détectées. Types: {", ".join(set(a.get("type","?") for a in alert_list[:10]))}' if alert_list else 'Aucune anomalie détectée.',
                       'duration_ms': int((_time.time() - t4) * 1000)})
+        _add_workflow_entry('AnomalyAgent', 'Orchestrator', 'RESULT',
+                            f'{len(alert_list)} anomalies détectées')
 
         # Step 5: Recommendation
         t5 = _time.time()
+        _add_workflow_entry('Orchestrator', 'RecommendationAgent', 'TASK_ASSIGN',
+                            'Synthèse finale')
         last_price = float(recent['close'].iloc[-1]) if len(recent) > 0 else 0
         fc_last = float(fc_values[-1]) if fc_values else last_price
         pct_change = ((fc_last - last_price) / last_price * 100) if last_price else 0
@@ -959,8 +1088,12 @@ def api_agents_analyze(stock_code):
         steps.append({'step': 5, 'name': 'Recommendation', 'status': 'completed',
                       'output': f'Recommandation: {action} — {reason} | Sentiment: {sentiment["sentiment"]}',
                       'duration_ms': int((_time.time() - t5) * 1000)})
+        _add_workflow_entry('RecommendationAgent', 'Orchestrator', 'DECISION',
+                            f'{action} — {reason}')
 
         total_ms = int((_time.time() - t0) * 1000)
+        _add_workflow_entry('Orchestrator', 'A2A_Broadcast', 'COMPLETE',
+                            f'Analyse {stock_code} terminée en {total_ms}ms')
         return jsonify(json_safe({
             'success': True,
             'steps': steps,
@@ -1438,9 +1571,28 @@ def api_portfolio_sarima_dashboard():
                 'upper_ci': forecast.get('ensemble', {}).get('upper_ci', []),
                 'num_models': forecast.get('ensemble', {}).get('num_models', 0),
             }
+            # Stationarity (ADF test)
             stat = forecast.get('stationarity', {})
             entry['stationary'] = stat.get('stationary', False)
+            entry['adf_statistic'] = stat.get('adf_statistic', None)
             entry['adf_pvalue'] = stat.get('adf_pvalue', None)
+            entry['adf_recommendation'] = stat.get('recommendation', '')
+
+            # AIC/BIC from model selection
+            model_sel = forecast.get('model_selection', {})
+            sarima_res = forecast.get('sarima', {})
+            ets_res = forecast.get('ets', {})
+            entry['aic'] = model_sel.get('best_aic') or sarima_res.get('aic')
+            entry['bic'] = model_sel.get('best_bic') or sarima_res.get('bic')
+            entry['aic_details'] = model_sel.get('all_aic', {})
+            entry['bic_details'] = model_sel.get('all_bic', {})
+
+            # Backtest metrics (RMSE, MAE, DA)
+            bt = forecast.get('backtest_metrics', {})
+            entry['rmse'] = bt.get('rmse')
+            entry['mae'] = bt.get('mae')
+            entry['directional_accuracy'] = bt.get('directional_accuracy')
+
             results.append(entry)
 
         return jsonify(json_safe({'success': True, 'stocks': results}))
@@ -1489,6 +1641,37 @@ def api_chat():
             if user:
                 context['user_profile'] = user.get_profile_summary()
                 context['user_name'] = user.display_name
+
+            # Add portfolio data for AI suggestions
+            pid = get_user_portfolio(uid)
+            if pid:
+                prices = {}
+                try:
+                    latest_date_pf = df['date'].max() if 'df' in dir() else None
+                    if latest_date_pf is not None:
+                        prices = df[df['date'] == latest_date_pf].set_index('code')['close'].to_dict()
+                except Exception:
+                    pass
+                pf = db_get_portfolio(pid, prices)
+                if pf.get('success'):
+                    context['portfolio'] = {
+                        'capital_liquide': pf.get('cash', 0),
+                        'valeur_titres': pf.get('invested', 0),
+                        'valeur_totale': pf.get('total_value', 0),
+                        'roi_pct': pf.get('roi_pct', 0),
+                        'capital_initial': pf.get('initial_capital', 0),
+                        'risk_profile': pf.get('risk_profile', 'moderate'),
+                        'nb_positions': pf.get('num_positions', 0),
+                        'positions': [
+                            {'titre': p.get('name', p.get('code', '')),
+                             'code': p.get('code', ''),
+                             'quantite': p.get('shares', 0),
+                             'pru': p.get('avg_price', 0),
+                             'prix_actuel': p.get('current_price', 0),
+                             'pnl_pct': p.get('pnl_pct', 0)}
+                            for p in (pf.get('positions') or [])[:10]
+                        ]
+                    }
     except Exception:
         pass
 
@@ -1583,6 +1766,21 @@ def api_onboarding():
     updates['profile_completed'] = True
 
     result = user_manager.update_profile(uid, updates)
+
+    # ── Auto-create portfolio if user doesn't have one yet ──
+    if result.get('success'):
+        existing_pid = get_user_portfolio(uid)
+        if not existing_pid:
+            capital = float(data.get('capital', 5000))
+            risk = data.get('risk', 'moderate')
+            pid = f"pf_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            pf_result = db_create_portfolio(pid, capital, risk, uid)
+            if pf_result.get('success'):
+                result['portfolio_created'] = True
+                result['portfolio_id'] = pid
+                result['initial_capital'] = capital
+                result['risk_profile'] = risk
+
     return jsonify(result)
 
 
@@ -1660,11 +1858,51 @@ def api_realtime_search():
     return jsonify({'success': True, 'results': results})
 
 
+@app.route('/api/realtime/files')
+def api_realtime_files():
+    """List persisted scraper data files."""
+    files = realtime_scraper.get_persisted_files()
+    return jsonify({'success': True, 'files': files})
+
+
+@app.route('/api/realtime/dashboard')
+def api_realtime_dashboard():
+    """Get comprehensive real-time data for dashboard display."""
+    latest = realtime_scraper.get_latest_all()
+    status = realtime_scraper.get_status()
+    files = realtime_scraper.get_persisted_files()
+
+    # Sort by variation for top movers
+    stocks_list = []
+    for ticker, data in latest.items():
+        stocks_list.append({
+            'ticker': ticker,
+            'name': data.get('name', ticker),
+            'price': data.get('price', 0),
+            'open': data.get('open', 0),
+            'high': data.get('high', 0),
+            'low': data.get('low', 0),
+            'volume': data.get('volume', 0),
+            'var_pct': data.get('var_pct', 0),
+            'time': data.get('time', ''),
+        })
+
+    stocks_list.sort(key=lambda x: abs(x.get('var_pct', 0)), reverse=True)
+
+    return jsonify({
+        'success': True,
+        'status': status,
+        'stocks': stocks_list,
+        'count': len(stocks_list),
+        'files': files,
+    })
+
+
 # ══════════════ RUN ══════════════
 
 if __name__ == '__main__':
     print("=" * 60, flush=True)
-    print("  BVMT Trading Assistant — made with love by the overfitters", flush=True)
+    print("  Tradeili — Trading Assistant by the overfitters", flush=True)
     print("  http://localhost:5000", flush=True)
     print("  Data ready — server starting...", flush=True)
     print("=" * 60, flush=True)

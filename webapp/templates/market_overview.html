@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Marché — BVMT Trading Assistant{% endblock %}
+{% block title %}Marché — Tradeili{% endblock %}
 {% block content %}
 <div id="loading" class="text-center py-5"><div class="spinner-border" style="width:3rem;height:3rem"></div><p class="mt-3 text-secondary">Chargement des données du marché...</p></div>
 <div id="content" class="d-none fade-in">
@@ -107,6 +107,44 @@
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ══════════ Real-Time Scraper Data ══════════ -->
+    <div class="d-flex justify-content-between align-items-center page-header">
+        <div>
+            <h5 class="mb-1"><i class="bi bi-broadcast me-2 text-cyan"></i>Données en Temps Réel — Scraper</h5>
+            <small class="text-secondary">Cours scrapés depuis ilboursa.com & bvmt.com.tn</small>
+        </div>
+        <button class="btn btn-sm btn-outline-accent" onclick="loadRealtimeData()"><i class="bi bi-arrow-clockwise me-1"></i>Actualiser</button>
+    </div>
+
+    <div id="realtimeStatus" class="row g-3 mb-3">
+        <div class="col-6 col-md-3"><div class="stat-card">
+            <div class="stat-label">Statut</div>
+            <div class="stat-value fs-5" id="rtStatus">—</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="stat-card">
+            <div class="stat-label">Titres Suivis</div>
+            <div class="stat-value fs-5 text-cyan" id="rtCount">—</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="stat-card">
+            <div class="stat-label">Dernier Scrape</div>
+            <div class="stat-value fs-6 text-secondary" id="rtLastScrape">—</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="stat-card">
+            <div class="stat-label">Fichiers Sauvegardés</div>
+            <div class="stat-value fs-5 text-accent" id="rtFiles">—</div>
+        </div></div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-table me-2"></i>Cours Scrapés en Direct</div>
+        <div class="card-body p-0" style="max-height:400px;overflow-y:auto">
+            <table class="table table-hover table-sm mb-0">
+                <thead><tr><th>Ticker</th><th>Nom</th><th>Prix</th><th>Ouv.</th><th>Haut</th><th>Bas</th><th>Volume</th><th>Var %</th><th>Heure</th></tr></thead>
+                <tbody id="realtimeTable"><tr><td colspan="9" class="text-center text-secondary">Cliquez sur Actualiser pour charger</td></tr></tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -218,5 +256,53 @@ document.getElementById('stockFilter').addEventListener('input', function() {
 });
 
 loadMarket();
+
+// ══════════ Real-Time Scraper Dashboard ══════════
+async function loadRealtimeData() {
+    try {
+        const res = await fetch('/api/realtime/dashboard');
+        const d = await res.json();
+        if (!d.success) return;
+
+        // Status badges
+        const st = d.status || {};
+        document.getElementById('rtStatus').innerHTML = st.running
+            ? '<span class="badge badge-green">Actif</span>'
+            : '<span class="badge badge-red">Arrêté</span>';
+        document.getElementById('rtCount').textContent = d.count || st.stocks_tracked || 0;
+        document.getElementById('rtLastScrape').textContent = st.last_scrape
+            ? new Date(st.last_scrape).toLocaleTimeString('fr-TN')
+            : '—';
+        document.getElementById('rtFiles').textContent = (d.files || []).length;
+
+        // Table
+        const stocks = d.stocks || [];
+        const tb = document.getElementById('realtimeTable');
+        if (stocks.length === 0) {
+            tb.innerHTML = '<tr><td colspan="9" class="text-center text-secondary">Aucune donnée scrapée disponible</td></tr>';
+            return;
+        }
+        tb.innerHTML = stocks.map(s => {
+            const varCls = s.var_pct > 0 ? 'text-green' : s.var_pct < 0 ? 'text-red' : 'text-secondary';
+            const timeStr = s.time ? new Date(s.time).toLocaleTimeString('fr-TN') : '—';
+            return `<tr>
+                <td><code>${s.ticker}</code></td>
+                <td>${s.name || '—'}</td>
+                <td class="fw-bold">${fmt(s.price, 3)}</td>
+                <td>${fmt(s.open, 3)}</td>
+                <td>${fmt(s.high, 3)}</td>
+                <td>${fmt(s.low, 3)}</td>
+                <td>${fmtK(s.volume)}</td>
+                <td class="${varCls} fw-bold">${s.var_pct > 0 ? '+' : ''}${fmt(s.var_pct, 2)}%</td>
+                <td class="text-secondary small">${timeStr}</td>
+            </tr>`;
+        }).join('');
+    } catch(e) {
+        console.error('Realtime load error:', e);
+    }
+}
+
+// Auto-load real-time data on page load
+loadRealtimeData();
 </script>
 {% endblock %}

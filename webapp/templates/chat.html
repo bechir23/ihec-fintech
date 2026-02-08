@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Assistant IA — BVMT{% endblock %}
+{% block title %}Assistant IA — Tradeili{% endblock %}
 {% block extra_css %}
 <style>
     .chat-container { max-width: 900px; margin: 0 auto; }
@@ -22,14 +22,14 @@
 {% block content %}
 <div class="chat-container">
     <div class="page-header text-center">
-        <h4 class="mb-1"><i class="bi bi-robot me-2 text-accent"></i>Assistant Intelligent BVMT</h4>
+        <h4 class="mb-1"><i class="bi bi-robot me-2 text-accent"></i>Assistant Intelligent Tradeili</h4>
         <small class="text-secondary">Posez vos questions sur le marché tunisien — Propulsé par GPT-4o + CrewAI</small>
     </div>
 
     <div class="card mb-3">
         <div class="chat-messages" id="chatMessages">
             <div class="msg msg-bot">
-                <div class="msg-label"><i class="bi bi-robot me-1"></i>Assistant BVMT</div>
+                <div class="msg-label"><i class="bi bi-robot me-1"></i>Assistant Tradeili</div>
                 Bienvenue ! Je suis votre assistant de trading pour la Bourse de Tunis. Posez-moi vos questions sur :
                 <ul class="mb-0 mt-2">
                     <li>L'analyse d'un titre (ex: BIAT, SFBT, BH)</li>
@@ -118,7 +118,7 @@ function processOnboardingAnswer(msg) {
 function addMessage(text, isUser) {
     const div = document.createElement('div');
     div.className = `msg ${isUser ? 'msg-user' : 'msg-bot'} fade-in`;
-    div.innerHTML = `<div class="msg-label">${isUser ? '<i class="bi bi-person me-1"></i>Vous' : '<i class="bi bi-robot me-1"></i>Assistant BVMT'}</div>${text}`;
+    div.innerHTML = `<div class="msg-label">${isUser ? '<i class="bi bi-person me-1"></i>Vous' : '<i class="bi bi-robot me-1"></i>Assistant Tradeili'}</div>${text}`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
@@ -169,7 +169,7 @@ function askSuggestion(btn) {
 
 async function clearChat() {
     await fetch('/api/chat/clear', {method:'POST'});
-    chatMessages.innerHTML = '<div class="msg msg-bot"><div class="msg-label"><i class="bi bi-robot me-1"></i>Assistant BVMT</div>Conversation effacée. Comment puis-je vous aider ?</div>';
+    chatMessages.innerHTML = '<div class="msg msg-bot"><div class="msg-label"><i class="bi bi-robot me-1"></i>Assistant Tradeili</div>Conversation effacée. Comment puis-je vous aider ?</div>';
 }
 </script>
 {% endblock %}

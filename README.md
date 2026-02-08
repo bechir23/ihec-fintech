@@ -1,8 +1,10 @@
-# 🇹🇳 BVMT Intelligent Trading Assistant
+# 🇹🇳 Tradeili — Intelligent Trading Assistant
 
-**Assistant Intelligent de Trading pour la Bourse des Valeurs Mobilières de Tunisie**
+**Tradeili — Assistant Intelligent de Trading pour la Bourse des Valeurs Mobilières de Tunisie**
 
 A full-stack AI-powered platform for market analysis, forecasting, anomaly detection, portfolio management, and multi-agent orchestration on the Tunisian stock exchange (BVMT).
+
+Built for **IHEC CodeLab 2.0** by **The Overfitters**.
 
 ---
 
@@ -26,16 +28,17 @@ A full-stack AI-powered platform for market analysis, forecasting, anomaly detec
 
 ## Overview
 
-This project implements a complete intelligent trading assistant for the BVMT, featuring:
+Tradeili is a complete intelligent trading assistant for the BVMT, featuring:
 
-- **Forecasting** — EMA extrapolation + weighted regression with optional XGBoost ensemble for price and volume prediction
+- **Forecasting** — EMA extrapolation + weighted regression with optional XGBoost ensemble, AIC/BIC model selection, and ADF stationarity diagnostics
 - **Sentiment Analysis** — GPT-4o powered multilingual (French/Arabic) market sentiment via OpenAI API
 - **Anomaly Detection** — Statistical (Z-score, thresholds) + ML-based (Isolation Forest) market surveillance
-- **Portfolio Management** — Decision engine with explainability, risk profiles, portfolio simulation with Sharpe ratio
-- **Multi-Agent System** — 5-agent pipeline (Market Analyst, Forecast, Sentiment, Anomaly, Recommendation) with safety guardrails
-- **Real-Time Scraping** — Background thread scraping ilboursa/bvmt for live prices every 60 seconds
+- **Portfolio Management** — Decision engine with explainability, risk profiles, portfolio simulation with Sharpe ratio, auto-created at onboarding
+- **Multi-Agent System** — 5-agent pipeline (Scraper → Forecast → Sentiment → Anomaly → Recommendation) with A2A workflow logging and safety guardrails
+- **Real-Time Scraping** — Background thread scraping ilboursa/bvmt with persistent JSON snapshots and daily JSONL tick logs
 - **Reinforcement Learning** — RL-based portfolio optimization with personalized learning from user feedback
-- **GPT-4o Chat** — Context-aware AI assistant powered by OpenAI for natural language market Q&A
+- **GPT-4o Chat** — Context-aware AI assistant powered by OpenAI with portfolio data injection for natural language market Q&A
+- **SARIMA Dashboard** — AIC, BIC, ADF statistic, stationarity diagnostics per stock with comparative charts
 
 ---
 
@@ -86,17 +89,20 @@ This project implements a complete intelligent trading assistant for the BVMT, f
 - 🔍 **Anomaly Detection** — Volume Z-score (>3σ), price threshold (>5%), suspicious patterns, Isolation Forest multivariate scoring
 - 💼 **Portfolio Simulator** — Buy/sell/track with Sharpe ratio, max drawdown, VaR, and decision explainability
 - 🤖 **Decision Engine** — 4-signal weighted aggregation (forecast + sentiment + technical + anomaly) with risk profiles
+- 📐 **Statistical Diagnostics** — ADF stationarity test, AIC/BIC model selection, backtest RMSE & directional accuracy
 
 ### Intelligence
-- 🧠 **5-Agent Pipeline** — MarketAnalyst → ForecastEngine → SentimentAnalyzer → AnomalyScanner → RecommendationEngine
-- 💬 **GPT-4o Chat** — Context-aware AI assistant with market data, powered by OpenAI API
+- 🧠 **5-Agent Pipeline** — Scraper → ForecastAgent → SentimentAgent → AnomalyAgent → RecommendationAgent
+- 📝 **A2A Workflow Log** — Full inter-agent communication trace (TASK_ASSIGN → RESULT → DECISION → COMPLETE)
+- 💬 **GPT-4o Chat** — Context-aware AI assistant with market data + portfolio holdings injected
 - 🎯 **RL Portfolio Optimization** — Reinforcement learning that adapts to user feedback and preferences
-- 🔄 **Real-Time Data** — Background scraping of ilboursa.com and bvmt.com.tn every 60 seconds
+- 🔄 **Real-Time Data** — Background scraping of ilboursa.com and bvmt.com.tn every 60 seconds with persistent storage
 
 ### Interface
 - 🌙 **Dark theme dashboard** with responsive design (Bootstrap 5)
 - 📊 **Interactive charts** (Chart.js) — TUNINDEX, candlestick, volume, RSI, MACD, Bollinger Bands
-- 🔒 **User authentication** — Login, registration, guided onboarding with investment profile
+- � **SARIMA Dashboard** — AIC/BIC comparisons, ADF stationarity radar, backtest metrics per stock
+- 🔒 **User authentication** — Login, registration, guided onboarding with investment profile + auto portfolio creation
 - 🚨 **Alert system** — Real-time anomaly notifications with severity levels (CRITICAL / HIGH / MEDIUM)
 - ⚡ **Ultra-fast forecasts** — Precomputed tail cache for sub-20ms API responses in Trading view
 
@@ -200,17 +206,11 @@ The server will:
 BVMT/
 ├── data/                              # Historical BVMT data (2016–2025)
 │   ├── histo_cotation_2016.txt        # 2016 daily quotes
-│   ├── histo_cotation_2017.txt        # 2017 daily quotes
-│   ├── histo_cotation_2018.txt        # 2018 daily quotes
-│   ├── histo_cotation_2019.txt        # 2019 daily quotes
-│   ├── histo_cotation_2020.txt        # 2020 daily quotes
-│   ├── histo_cotation_2021.txt        # 2021 daily quotes
-│   ├── histo_cotation_2022.csv        # 2022 daily quotes
-│   ├── histo_cotation_2023.csv        # 2023 daily quotes
-│   ├── histo_cotation_2024.csv        # 2024 daily quotes
+│   ├── ...                            # 2017–2024 daily quotes
 │   ├── histo_cotation_2025.csv        # 2025 daily quotes (partial)
-│   ├── web_histo_cotation_2022.csv    # Web-sourced 2022 data
-│   └── web_histo_cotation_2023.csv    # Web-sourced 2023 data
+│   └── scraper/                       # Realtime scraper persistence
+│       ├── latest_snapshot.json       # Latest scrape snapshot
+│       └── ticks_YYYYMMDD.jsonl       # Daily tick logs
 │
 ├── modules/                           # Core ML/analytics modules
 │   ├── common/
@@ -250,6 +250,7 @@ BVMT/
 │   │   ├── agents.html                # Multi-agent analysis dashboard
 │   │   └── chat.html                  # AI chat assistant
 │   └── static/
+│       ├── img/                       # Brand assets (Tradeili logo)
 │       ├── css/                       # Custom stylesheets
 │       └── js/                        # Client-side JavaScript
 │
@@ -278,10 +279,11 @@ BVMT/
 
 ### Forecasting (`modules/forecasting/forecaster.py`)
 - **BVMTForecaster** — EMA extrapolation + weighted linear regression (fast mode) + optional XGBoost/SARIMA ensemble
-- Stationarity testing (ADF + KPSS) with Box-Cox variance stabilization
+- ADF stationarity testing with automatic recommendation ("Stationary" / "Difference needed")
+- AIC/BIC information criteria computed from fitted residuals using Gaussian log-likelihood
+- Backtest metrics: RMSE, MAE, directional accuracy from walk-forward evaluation
 - Precomputed tail cache at startup for ultra-fast (<20ms) per-request forecasts
 - Confidence intervals from historical volatility with √t scaling
-- Walk-forward backtesting support
 
 ### Sentiment (`modules/sentiment/analyzer.py`)
 - **SentimentAnalyzer** — GPT-4o via OpenAI API with real price context injection
@@ -309,7 +311,9 @@ BVMT/
 ### Real-Time Scraper (`modules/scraper/realtime.py`)
 - Background thread scraping ilboursa.com and bvmt.com.tn every 60 seconds
 - Latest prices, intraday ticks, OHLCV candle aggregation
+- Persistent storage: `data/scraper/latest_snapshot.json` + daily `data/scraper/ticks_YYYYMMDD.jsonl`
 - Search functionality for ticker lookup
+- File listing API with sizes and timestamps
 
 ### RL Portfolio (`modules/rl/portfolio_rl.py`)
 - Reinforcement learning-based portfolio optimization
@@ -339,7 +343,7 @@ BVMT/
 ### Forecasting
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/forecast/<code>?fast=1&horizon=5` | GET | Price forecast with confidence intervals |
+| `/api/forecast/<code>?fast=1&horizon=5` | GET | Price forecast with CI, ADF stationarity, AIC/BIC |
 
 ### Anomaly Detection
 | Endpoint | Method | Description |
@@ -355,12 +359,13 @@ BVMT/
 | `/api/portfolio/sell` | POST | Sell stock `{code, qty, price}` |
 | `/api/portfolio/status` | GET | Portfolio performance & holdings |
 | `/api/portfolio/suggest` | POST | AI suggestions `{budget, profile}` |
+| `/api/portfolio/sarima_dashboard` | POST | AIC/BIC/ADF stats for portfolio stocks |
 
 ### Agents
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/agents/status` | GET | Agent system health |
-| `/api/agents/analyze/<code>` | POST | Full 5-agent pipeline analysis |
+| `/api/agents/status` | GET | Agent system health + A2A workflow log |
+| `/api/agents/analyze/<code>` | POST | Full 5-agent pipeline analysis with workflow trace |
 
 ### Chat
 | Endpoint | Method | Description |
@@ -375,6 +380,8 @@ BVMT/
 | `/api/realtime/latest` | GET | Latest prices for all stocks |
 | `/api/realtime/quote/<ticker>` | GET | Latest quote for a stock |
 | `/api/realtime/candles/<ticker>` | GET | OHLCV candles `?timeframe=5m&limit=100` |
+| `/api/realtime/files` | GET | List persisted scraper data files |
+| `/api/realtime/dashboard` | GET | Full realtime dashboard with all tickers |
 
 ---
 
@@ -384,19 +391,24 @@ The multi-agent pipeline runs 5 specialized agents in sequence to produce a comp
 
 ```
 ┌─────────────────┐   ┌─────────────────┐   ┌──────────────────┐
-│  MarketAnalyst  │──▶│  ForecastEngine │──▶│SentimentAnalyzer │
-│  Price & volume │   │  EMA+régression │   │ GPT-4o analysis  │
-│  trend analysis │   │  5-day forecast │   │  news sentiment  │
+│  ScraperAgent   │──▶│  ForecastAgent  │──▶│ SentimentAgent   │
+│  Data collect   │   │  EMA+régression │   │ GPT-4o analysis  │
+│  + persistence  │   │  AIC/BIC/ADF    │   │  news sentiment  │
 └─────────────────┘   └─────────────────┘   └────────┬─────────┘
                                                       │
                       ┌─────────────────┐   ┌─────────▼─────────┐
-                      │ Recommendation  │◀──│  AnomalyScanner   │
+                      │ Recommendation  │◀──│  AnomalyAgent     │
                       │    Engine       │   │  Z-score + IF     │
                       │ BUY/SELL/HOLD   │   │  pattern detect   │
-                      └─────────────────┘   └───────────────────┘
+                      └────────┬────────┘   └───────────────────┘
+                               │
+                      ┌────────▼────────┐
+                      │  A2A Broadcast  │
+                      │  Workflow Log   │
+                      └─────────────────┘
 ```
 
-Each agent is wrapped with **SafetyGuard** validation and **AgentLogger** audit trailing.
+Each agent step generates A2A inter-agent messages (TASK_ASSIGN → RESULT → DECISION → COMPLETE) visible in the Workflow Log on the Agents dashboard.
 
 ---
 
@@ -459,8 +471,8 @@ python -m pytest tests/ --cov=modules --cov=agents --cov-report=html
 
 ## License
 
-Academic project — BVMT Trading Assistant for IHEC FinTech / Code Lab 2.0.
+Academic project — **Tradeili** Trading Assistant for IHEC CodeLab 2.0.
 
 ---
 
-*Built for the modernization of financial market analysis in Tunisia 🇹🇳*
+*Built by The Overfitters for the modernization of financial market analysis in Tunisia 🇹🇳*

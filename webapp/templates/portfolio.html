@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Portefeuille — BVMT{% endblock %}
+{% block title %}Portefeuille — Tradeili{% endblock %}
 {% block content %}
 <div class="page-header">
     <h4 class="mb-1"><i class="bi bi-wallet2 me-2 text-accent"></i>Gestionnaire de Portefeuille</h4>
-    <small class="text-secondary">Simuler, optimiser et suivre vos investissements sur le BVMT</small>
+    <small class="text-secondary">Simuler, optimiser et suivre vos investissements sur le marché tunisien</small>
 </div>
 
 <!-- Create Portfolio -->
@@ -95,6 +95,15 @@
     </div>
 </div>
 
+<!-- ══════════ RL Learning Summary ══════════ -->
+<div id="rlSummarySection" class="d-none">
+    <div class="page-header mt-4">
+        <h5 class="mb-1"><i class="bi bi-robot me-2 text-purple"></i>Apprentissage par Renforcement (RL)</h5>
+        <small class="text-secondary">Le système apprend de vos feedbacks pour personnaliser les recommandations</small>
+    </div>
+    <div class="row g-3 mb-3" id="rlSummaryCards"></div>
+</div>
+
 <!-- ══════════ SARIMA Stats Dashboard ══════════ -->
 <div class="page-header mt-4">
     <h5 class="mb-1"><i class="bi bi-graph-up-arrow me-2 text-purple"></i>Tableau de Bord SARIMA — Analyse Quantitative</h5>
@@ -147,9 +156,11 @@
                             <th>Var.</th>
                             <th>AIC</th>
                             <th>BIC</th>
+                            <th>RMSE</th>
+                            <th>ADF stat</th>
                             <th>ADF p-val</th>
                             <th>Stationnaire</th>
-                            <th>Modèles</th>
+                            <th>DA %</th>
                         </tr>
                     </thead>
                     <tbody id="sarimaTable"></tbody>
@@ -190,9 +201,45 @@ let allocChartInst = null;
             portfolioId = d.portfolio_id;
             document.getElementById('portfolioInfo').classList.remove('d-none');
             document.getElementById('tradeBox').classList.remove('d-none');
+            // Pre-fill capital/risk from existing portfolio
+            if (d.initial_capital) document.getElementById('capital').value = d.initial_capital;
+            if (d.risk_profile) {
+                const sel = document.getElementById('riskProfile');
+                for (let opt of sel.options) {
+                    if (opt.value === d.risk_profile) { opt.selected = true; break; }
+                }
+            }
             updatePortfolio();
         }
     } catch(e) { console.log('No existing portfolio'); }
+
+    // Load RL summary
+    try {
+        const rlRes = await fetch('/api/rl/summary');
+        const rlD = await rlRes.json();
+        if (rlD.success && rlD.total_feedback > 0) {
+            document.getElementById('rlSummarySection').classList.remove('d-none');
+            const topStocks = (rlD.top_stocks || []).map(s => `<span class="badge badge-green me-1">${s.code} (${fmt(s.score,2)})</span>`).join('');
+            const bottomStocks = (rlD.bottom_stocks || []).filter(s => s.score < 0).map(s => `<span class="badge badge-red me-1">${s.code} (${fmt(s.score,2)})</span>`).join('');
+            document.getElementById('rlSummaryCards').innerHTML = `
+                <div class="col-6 col-md-3"><div class="stat-card">
+                    <div class="stat-label">Total Feedbacks</div>
+                    <div class="stat-value fs-4 text-accent">${rlD.total_feedback}</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="stat-card">
+                    <div class="stat-label">Taux Positif</div>
+                    <div class="stat-value fs-4 text-green">${fmt(rlD.positive_rate||0)}%</div>
+                </div></div>
+                <div class="col-6 col-md-3"><div class="stat-card">
+                    <div class="stat-label">Ajustement Risque</div>
+                    <div class="stat-value fs-5 ${rlD.risk_adjustment > 0 ? 'text-green' : 'text-red'}">${rlD.risk_adjustment > 0 ? '+' : ''}${fmt(rlD.risk_adjustment||0, 3)}</div>
+                </div></div>
+                <div class="col-12 col-md-3"><div class="stat-card">
+                    <div class="stat-label">Top Titres</div>
+                    <div class="mt-1">${topStocks || '<span class="text-secondary small">Aucun</span>'}</div>
+                </div></div>`;
+        }
+    } catch(e) { console.log('No RL data'); }
 })();
 
 async function createPortfolio() {
@@ -215,9 +262,9 @@ async function updatePortfolio() {
     if (!d.success) return;
 
     document.getElementById('pfCash').textContent = fmt(d.cash||d.available_cash, 2) + ' TND';
-    document.getElementById('pfStocks').textContent = fmt(d.stocks_value||0, 2) + ' TND';
-    document.getElementById('pfTotal').textContent = fmt(d.total_value||d.cash||0, 2) + ' TND';
-    const perf = d.performance_pct || 0;
+    document.getElementById('pfStocks').textContent = fmt(d.invested||0, 2) + ' TND';
+    document.getElementById('pfTotal').textContent = fmt(d.total_value||0, 2) + ' TND';
+    const perf = d.roi_pct || d.performance_pct || 0;
     const perfEl = document.getElementById('pfPerf');
     perfEl.textContent = (perf>0?'+':'') + fmt(perf) + '%';
     perfEl.className = 'stat-value fs-5 ' + pctClass(perf);
@@ -311,15 +358,20 @@ async function getSuggestion() {
                     const name = a.stock_name || a.stock || a.stock_code || '—';
                     const code = a.stock_code || a.code || '—';
                     const weight = a.allocation_pct || a.weight_pct || a.weight || 0;
+                    const rlAdj = a.rl_adjustment != null ? ` | RL: ${a.rl_adjustment > 0 ? '+' : ''}${fmt(a.rl_adjustment, 3)}` : '';
                     html += `<div class="col-md-4"><div class="stat-card">
                         <div class="fw-bold text-accent">${name}</div>
-                        <div class="small text-secondary">Code: ${code} | Confiance: ${fmt(a.confidence||0)}%</div>
+                        <div class="small text-secondary">Code: ${code} | Confiance: ${fmt(a.confidence||0)}%${rlAdj}</div>
                         <div class="mt-2">Allocation: <strong>${fmt(weight)}%</strong></div>
                         <div>Montant: <strong>${fmt(a.amount||0, 2)} TND</strong></div>
                         <div>Prix unitaire: <strong>${fmt(a.price||0, 3)} TND</strong></div>
                         <div>Actions: <strong>${a.shares||'—'}</strong></div>
                         ${a.explanations ? '<div class="mt-2 small text-secondary">' + a.explanations.slice(0,3).map(e=>'<div>'+e+'</div>').join('') + '</div>' : ''}
-                        <div class="mt-2"><span class="badge badge-green">${a.action||'ACHETER'}</span></div>
+                        <div class="mt-2">
+                            <span class="badge badge-green">${a.action||'ACHETER'}</span>
+                            <button class="btn btn-sm btn-outline-success ms-2" onclick="sendRLFeedback('${code}','${name}','buy',true)" title="J'aime cette suggestion"><i class="bi bi-hand-thumbs-up"></i></button>
+                            <button class="btn btn-sm btn-outline-danger ms-1" onclick="sendRLFeedback('${code}','${name}','buy',false)" title="Je n'aime pas"><i class="bi bi-hand-thumbs-down"></i></button>
+                        </div>
                     </div></div>`;
                 });
                 html += '</div>';
@@ -385,6 +437,30 @@ async function applySuggestion() {
     await updatePortfolio();
 }
 
+// ══════════ RL Feedback ══════════
+async function sendRLFeedback(stockCode, stockName, action, liked) {
+    try {
+        const res = await fetch('/api/rl/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ stock_code: stockCode, stock_name: stockName, action, liked, reason: liked ? 'user_approved' : 'user_rejected' })
+        });
+        const d = await res.json();
+        if (d.success) {
+            const icon = liked ? '👍' : '👎';
+            const btn = event.target.closest('button');
+            btn.classList.add(liked ? 'btn-success' : 'btn-danger');
+            btn.classList.remove(liked ? 'btn-outline-success' : 'btn-outline-danger');
+            // Show brief feedback toast
+            const toast = document.createElement('div');
+            toast.className = 'position-fixed bottom-0 end-0 p-3';
+            toast.style.zIndex = '9999';
+            toast.innerHTML = `<div class="alert ${liked ? 'alert-success' : 'alert-warning'} py-2 px-3 small">${icon} Feedback enregistré pour ${stockName} (score: ${fmt(d.stock_score||0, 3)})</div>`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+    } catch(e) { console.error('RL feedback error:', e); }
+}
+
 // ══════════ SARIMA Dashboard ══════════
 let sarForecastInst = null, sarAICInst = null, sarCIInst = null, sarDiagInst = null;
 
@@ -415,8 +491,13 @@ async function loadSarimaDashboard() {
         // KPIs
         const avgModels = (stocks.reduce((s, st) => s + (st.num_models || 0), 0) / stocks.length).toFixed(1);
         const statCount = stocks.filter(s => s.stationary).length;
-        const avgAIC = stocks.filter(s => s.aic).length > 0
-            ? (stocks.filter(s => s.aic).reduce((s, st) => s + st.aic, 0) / stocks.filter(s => s.aic).length).toFixed(0)
+        const aicVals = stocks.filter(s => s.aic != null);
+        const avgAIC = aicVals.length > 0
+            ? (aicVals.reduce((s, st) => s + st.aic, 0) / aicVals.length).toFixed(1)
+            : '—';
+        const rmseVals = stocks.filter(s => s.rmse != null);
+        const avgRMSE = rmseVals.length > 0
+            ? (rmseVals.reduce((s, st) => s + st.rmse, 0) / rmseVals.length).toFixed(4)
             : '—';
         const bullish = stocks.filter(s => {
             const fc = s.forecast || [];
@@ -429,16 +510,16 @@ async function loadSarimaDashboard() {
                 <div class="stat-value fs-4 text-accent">${stocks.length}</div>
             </div></div>
             <div class="col-6 col-md-3"><div class="stat-card">
-                <div class="stat-label">Moy. Modèles/Titre</div>
-                <div class="stat-value fs-4 text-cyan">${avgModels}</div>
+                <div class="stat-label">AIC Moyen</div>
+                <div class="stat-value fs-4 text-cyan">${avgAIC}</div>
             </div></div>
             <div class="col-6 col-md-3"><div class="stat-card">
                 <div class="stat-label">Séries Stationnaires</div>
                 <div class="stat-value fs-4 text-green">${statCount} / ${stocks.length}</div>
             </div></div>
             <div class="col-6 col-md-3"><div class="stat-card">
-                <div class="stat-label">Signal Haussier</div>
-                <div class="stat-value fs-4 text-orange">${bullish} / ${stocks.length}</div>
+                <div class="stat-label">RMSE Moyen</div>
+                <div class="stat-value fs-4 text-orange">${avgRMSE}</div>
             </div></div>`;
 
         // Forecast Chart
@@ -504,16 +585,23 @@ async function loadSarimaDashboard() {
             const lastFc = fc.length > 0 ? fc[fc.length - 1] : null;
             const varPct = lastFc && s.current_price ? ((lastFc - s.current_price) / s.current_price * 100) : 0;
             const adfP = s.adf_pvalue != null ? (+s.adf_pvalue).toFixed(4) : '—';
+            const adfStat = s.adf_statistic != null ? (+s.adf_statistic).toFixed(4) : '—';
+            const aicVal = s.aic != null ? (+s.aic).toFixed(1) : '—';
+            const bicVal = s.bic != null ? (+s.bic).toFixed(1) : '—';
+            const rmseVal = s.rmse != null ? (+s.rmse).toFixed(4) : '—';
+            const daVal = s.directional_accuracy != null ? (+s.directional_accuracy).toFixed(1) + '%' : '—';
             return `<tr>
                 <td><a href="/stock/${s.stock_code}" class="text-accent">${(s.stock_name||s.stock_code).substring(0,20)}</a></td>
                 <td class="fw-bold">${fmt(s.current_price, 3)}</td>
                 <td class="fw-bold">${lastFc ? fmt(lastFc, 3) : '—'}</td>
                 <td class="${pctClass(varPct)}">${varPct > 0 ? '+' : ''}${fmt(varPct, 2)}%</td>
-                <td>${s.aic || '—'}</td>
-                <td>${s.bic || '—'}</td>
+                <td>${aicVal}</td>
+                <td>${bicVal}</td>
+                <td>${rmseVal}</td>
+                <td>${adfStat}</td>
                 <td>${adfP}</td>
                 <td>${s.stationary ? '<span class="badge badge-green">Oui</span>' : '<span class="badge badge-red">Non</span>'}</td>
-                <td><span class="badge badge-accent">${s.num_models || 0}</span></td>
+                <td>${daVal}</td>
             </tr>`;
         }).join('');
 

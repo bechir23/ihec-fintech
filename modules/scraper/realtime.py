@@ -2,6 +2,7 @@
 Real-Time Market Data Scraper for BVMT.
 Scrapes live stock prices from ilboursa.com and bvmt.com.tn.
 Provides multi-timeframe data (1min, 5min, 15min, 1h) via in-memory cache.
+Persists snapshots to data/scraper/ for visibility and data recovery.
 """
 import re
 import time
@@ -11,6 +12,7 @@ import requests
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Dict, List, Optional
+from pathlib import Path
 from bs4 import BeautifulSoup
 
 
@@ -18,6 +20,7 @@ class RealtimeScraper:
     """
     Scrapes real-time quotes from Tunisian stock market sources.
     Stores tick data in memory for multi-timeframe candle generation.
+    Persists snapshots to data/scraper/ after each scrape cycle.
     """
 
     ILBOURSA_AZ = "https://www.ilboursa.com/marches/aaz"
@@ -40,9 +43,16 @@ class RealtimeScraper:
         self._last_scrape = None
         # Scrape errors
         self._errors: list = []
+        # Scrape counter for persistence
+        self._scrape_count = 0
 
         # Code-to-ticker mapping (built from ilboursa)
         self._ticker_map: Dict[str, str] = {}  # internal_code -> ticker
+
+        # Persistence directory
+        self._data_dir = Path(__file__).resolve().parent.parent.parent / "data" / "scraper"
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._load_persisted_data()
 
     def start(self):
         """Start background scraping."""
@@ -149,6 +159,10 @@ class RealtimeScraper:
 
             if count > 0:
                 print(f"[SCRAPER] {now.strftime('%H:%M:%S')} — {count} stocks updated", flush=True)
+                self._scrape_count += 1
+                # Persist every 5 scrapes (every ~5 minutes)
+                if self._scrape_count % 5 == 0:
+                    self._persist_data()
 
         except requests.RequestException as e:
             # Fallback to BVMT ticker
@@ -223,6 +237,57 @@ class RealtimeScraper:
                 # Keep last 500 candles per timeframe
                 if len(candles) > 500:
                     self._candles[ticker][tf] = candles[-500:]
+
+    # ── Persistence ──
+
+    def _persist_data(self):
+        """Save latest snapshot and recent ticks to disk for visibility."""
+        try:
+            with self._lock:
+                snapshot = {
+                    'timestamp': datetime.now().isoformat(),
+                    'stocks_count': len(self._latest),
+                    'latest': dict(self._latest),
+                }
+            # Save latest snapshot
+            snapshot_file = self._data_dir / 'latest_snapshot.json'
+            with open(snapshot_file, 'w', encoding='utf-8') as f:
+                json.dump(snapshot, f, ensure_ascii=False, indent=2)
+
+            # Save daily log (append mode)
+            daily_file = self._data_dir / f"ticks_{datetime.now().strftime('%Y%m%d')}.jsonl"
+            with open(daily_file, 'a', encoding='utf-8') as f:
+                for ticker, data in snapshot.get('latest', {}).items():
+                    entry = {'ticker': ticker, **data}
+                    f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+
+        except Exception as e:
+            self._errors.append({'time': datetime.now().isoformat(), 'error': f'Persist: {e}'})
+
+    def _load_persisted_data(self):
+        """Load latest snapshot from disk on startup."""
+        try:
+            snapshot_file = self._data_dir / 'latest_snapshot.json'
+            if snapshot_file.exists():
+                with open(snapshot_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if data.get('latest'):
+                    self._latest = data['latest']
+                    print(f"[SCRAPER] Loaded {len(self._latest)} stocks from persisted snapshot", flush=True)
+        except Exception as e:
+            print(f"[SCRAPER] Could not load persisted data: {e}", flush=True)
+
+    def get_persisted_files(self) -> list:
+        """List all persisted data files for visibility."""
+        files = []
+        for f in sorted(self._data_dir.glob('*.json*')):
+            stat = f.stat()
+            files.append({
+                'name': f.name,
+                'size_kb': round(stat.st_size / 1024, 1),
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        return files
 
     # ── Public API ──
 
