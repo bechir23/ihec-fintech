@@ -61,7 +61,7 @@ This project implements a complete intelligent trading assistant for the BVMT, f
 │       │             │            │              │            │
 │  ┌────┴────┐  ┌─────┴────┐ ┌────┴─────┐  ┌─────┴─────┐     │
 │  │Forecast │  │Sentiment │ │ Anomaly  │  │ Portfolio  │     │
-│  │ Engine  │  │ Analyzer │ │ Detector │  │  + RL Opt  │     │
+│  │ Engine  │  │ Analyzer │ │ Detector │  │  + RL   │     │
 │  └────┬────┘  └─────┬────┘ └────┬─────┘  └─────┬─────┘     │
 │       └─────────────┴───────────┴───────────────┘           │
 │                          │                                   │
