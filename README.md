@@ -83,28 +83,28 @@ Tradeili is a complete intelligent trading assistant for the BVMT, featuring:
 ## Features
 
 ### Core Analytics
-- 📈 **Price Forecasting** — EMA + weighted linear regression with damped trends, confidence intervals, and optional XGBoost ensemble
-- 📊 **Volume Forecasting** — Liquidity probability estimation with high/low confidence bands
-- 📰 **Sentiment Analysis** — GPT-4o via OpenAI API for French/Arabic market news analysis with real price context
-- 🔍 **Anomaly Detection** — Volume Z-score (>3σ), price threshold (>5%), suspicious patterns, Isolation Forest multivariate scoring
-- 💼 **Portfolio Simulator** — Buy/sell/track with Sharpe ratio, max drawdown, VaR, and decision explainability
-- 🤖 **Decision Engine** — 4-signal weighted aggregation (forecast + sentiment + technical + anomaly) with risk profiles
-- 📐 **Statistical Diagnostics** — ADF stationarity test, AIC/BIC model selection, backtest RMSE & directional accuracy
+-  **Price Forecasting** — EMA + weighted linear regression with damped trends, confidence intervals, and optional XGBoost ensemble
+-  **Volume Forecasting** — Liquidity probability estimation with high/low confidence bands
+-  **Sentiment Analysis** — GPT-4o via OpenAI API for French/Arabic market news analysis with real price context
+-  **Anomaly Detection** — Volume Z-score (>3σ), price threshold (>5%), suspicious patterns, Isolation Forest multivariate scoring
+-  **Portfolio Simulator** — Buy/sell/track with Sharpe ratio, max drawdown, VaR, and decision explainability
+-  **Decision Engine** — 4-signal weighted aggregation (forecast + sentiment + technical + anomaly) with risk profiles
+-  **Statistical Diagnostics** — ADF stationarity test, AIC/BIC model selection, backtest RMSE & directional accuracy
 
 ### Intelligence
-- 🧠 **5-Agent Pipeline** — Scraper → ForecastAgent → SentimentAgent → AnomalyAgent → RecommendationAgent
-- 📝 **A2A Workflow Log** — Full inter-agent communication trace (TASK_ASSIGN → RESULT → DECISION → COMPLETE)
-- 💬 **GPT-4o Chat** — Context-aware AI assistant with market data + portfolio holdings injected
-- 🎯 **RL Portfolio Optimization** — Reinforcement learning that adapts to user feedback and preferences
-- 🔄 **Real-Time Data** — Background scraping of ilboursa.com and bvmt.com.tn every 60 seconds with persistent storage
+-  **5-Agent Pipeline** — Scraper → ForecastAgent → SentimentAgent → AnomalyAgent → RecommendationAgent
+-  **A2A Workflow Log** — Full inter-agent communication trace (TASK_ASSIGN → RESULT → DECISION → COMPLETE)
+-  **GPT-4o Chat** — Context-aware AI assistant with market data + portfolio holdings injected
+-  **RL Portfolio Optimization** — Reinforcement learning that adapts to user feedback and preferences
+-  **Real-Time Data** — Background scraping of ilboursa.com and bvmt.com.tn every 60 seconds with persistent storage
 
 ### Interface
-- 🌙 **Dark theme dashboard** with responsive design (Bootstrap 5)
-- 📊 **Interactive charts** (Chart.js) — TUNINDEX, candlestick, volume, RSI, MACD, Bollinger Bands
-- � **SARIMA Dashboard** — AIC/BIC comparisons, ADF stationarity radar, backtest metrics per stock
-- 🔒 **User authentication** — Login, registration, guided onboarding with investment profile + auto portfolio creation
-- 🚨 **Alert system** — Real-time anomaly notifications with severity levels (CRITICAL / HIGH / MEDIUM)
-- ⚡ **Ultra-fast forecasts** — Precomputed tail cache for sub-20ms API responses in Trading view
+-  **Dark theme dashboard** with responsive design (Bootstrap 5)
+-  **Interactive charts** (Chart.js) — TUNINDEX, candlestick, volume, RSI, MACD, Bollinger Bands
+-  **SARIMA Dashboard** — AIC/BIC comparisons, ADF stationarity radar, backtest metrics per stock
+-  **User authentication** — Login, registration, guided onboarding with investment profile + auto portfolio creation
+-  **Alert system** — Real-time anomaly notifications with severity levels (CRITICAL / HIGH / MEDIUM)
+-  **Ultra-fast forecasts** — Precomputed tail cache for sub-20ms API responses in Trading view
 
 ---
 
@@ -469,10 +469,8 @@ python -m pytest tests/ --cov=modules --cov=agents --cov-report=html
 
 ---
 
-## License
-
-Academic project — **Tradeili** Trading Assistant for IHEC CodeLab 2.0.
+**Tradeili** Trading Assistant for IHEC CodeLab 2.0.
 
 ---
 
-*Built by The Overfitters for the modernization of financial market analysis in Tunisia 🇹🇳*
+*Built for the modernization of financial market analysis in Tunisia 🇹🇳*
