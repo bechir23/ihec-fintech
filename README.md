@@ -473,4 +473,8 @@ python -m pytest tests/ --cov=modules --cov=agents --cov-report=html
 
 ---
 
+
+https://github.com/user-attachments/assets/b5c2220b-ae1d-4a6c-b58d-7fdde37559de
+
+
 *Built for the modernization of financial market analysis in Tunisia 🇹🇳*
