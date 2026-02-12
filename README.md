@@ -4,7 +4,6 @@
 
 A full-stack AI-powered platform for market analysis, forecasting, anomaly detection, portfolio management, and multi-agent orchestration on the Tunisian stock exchange (BVMT).
 
-Built for **IHEC CodeLab 2.0** by **The Overfitters**.
 
 ---
 
